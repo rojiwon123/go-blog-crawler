@@ -1,0 +1,5 @@
+{
+  "go.goroot": "~/.asdf/installs/golang/1.24.5/go",
+  "go.lintTool": "golangci-lint-v2",
+  "go.lintOnSave": "package"
+}

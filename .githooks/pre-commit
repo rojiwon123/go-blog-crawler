@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# 커밋 대상 파일들만 포맷팅
+task format:staged
+
+# 포맷팅된 파일들을 다시 스테이징
+git diff --name-only --cached | xargs -r git add
+
+# 린팅 실행 (스테이징된 파일만)
+SKIP_GOLANGCI_LINT=1 task lint:staged

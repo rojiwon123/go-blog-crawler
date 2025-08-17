@@ -1,0 +1,143 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  APP: api
+# env:
+
+tasks:
+  default:
+    desc: default cmd
+    cmds:
+      - task: init
+      - task: setup:git
+      - task: setup:deps
+      - task: setup:tools
+
+  init:
+    desc: init project
+    cmds:
+      - brew bundle
+    sources:
+      - Brewfile
+    preconditions:
+      - sh: command -v brew
+        msg: "Please install Homebrew: https://brew.sh/"
+
+  setup:git:
+    desc: setup git config
+    cmds:
+      - git config core.hooksPath .githooks
+
+  setup:tools:
+    desc: setup tools
+    run: once
+    cmds:
+      - echo "Installing tools from tools.go"
+      - go mod tidy
+      - cat tools.go | grep _ | awk -F'"' '{print $2}' | xargs -tI % go install %
+    sources:
+      - tools.go
+      - go.mod
+      - .tool-versions
+
+  clean:tools:
+    desc: clean tools
+    cmds:
+      - echo "Cleaning tools from tools.go"
+      - cat tools.go | grep _ | awk -F'"' '{print $2}' | xargs -tI % go clean -i %
+    sources:
+      - tools.go
+      - go.mod
+
+  setup:deps:
+    desc: install dependencies
+    run: once
+    cmds:
+      - cmd: asdf plugin add golang https://github.com/kennyp/asdf-golang.git
+        ignore_error: true
+      - cmd: asdf plugin add golangci-lint https://github.com/hypnoglow/asdf-golangci-lint.git
+        ignore_error: true
+      - asdf install
+      - asdf current
+    sources:
+      - .tool-versions
+
+  build:
+    desc: build application
+    cmds:
+      - CGO_ENABLED=0 GOOS=linux GOARCH={{.ARCH}} go build -a -installsuffix cgo -ldflags="-w -s" -o bin/{{.APP}}.linux.{{.ARCH}} cmd/*.go
+
+  build:all:
+    desc: build application for all platforms
+    cmds:
+      - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -ldflags="-w -s" -o bin/{{.APP}}.linux.amd64 cmd/*.go
+      - CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -a -installsuffix cgo -ldflags="-w -s" -o bin/{{.APP}}.linux.arm64 cmd/*.go
+      - CGO_ENABLED=0 go build -a -installsuffix cgo -ldflags="-w -s" -o bin/{{.APP}} cmd/*.go
+
+  clean:build:
+    desc: clean build files
+    cmds:
+      - rm -rf bin
+
+  run:local:
+    desc: run application
+    dotenv: [".env"]
+    cmds:  
+      - go run -v -race cmd/local/main.go
+
+  format:
+    desc: format all Go files
+    cmds:
+      - echo "Formatting all Go files..."
+      - goimports -w .
+      - find . -not -path './tools.go' -not -name '*_mock.go' -name '*.go' -print0 | xargs -0 -P {{.NUM_CPUS}} -I {} {{.GOBIN}}/goimports-reviser -use-cache -rm-unused -format {}
+      - go mod tidy
+    vars:
+      NUM_CPUS:
+        sh: command -v nproc >/dev/null && (nproc --all 2>/dev/null || nproc 2>/dev/null) || sysctl -n hw.ncpu
+      GOBIN:
+        sh: go env GOBIN
+
+  format:staged:
+    desc: format staged Go files
+    silent: true
+    cmds:
+      - sh -c 'STAGED_FILES=$(git diff --name-only --cached | grep "\.go$" | grep -v "tools\.go" | grep -v "_mock\.go" || true); if [ -n "$STAGED_FILES" ]; then echo "$STAGED_FILES" | xargs -I {} goimports -w {}; echo "$STAGED_FILES" | xargs -I {} {{.GOBIN}}/goimports-reviser -use-cache -rm-unused -format {}; fi'
+      - go mod tidy
+    vars:
+      GOBIN:
+        sh: go env GOBIN
+
+
+
+  lint:
+    desc: Lints all Go files
+    deps:
+      - setup:tools
+    cmds:
+      - if [ "$SKIP_GOLANGCI_LINT" != "1" ]; then golangci-lint run ./...; fi
+      - find . -not -path './tools.go' -not -name '*_mock.go' -name '*.go' -print0 | xargs -0 -P {{.NUM_CPUS}} -I {} {{.GOBIN}}/goimports-reviser -use-cache -rm-unused -format -list-diff -set-exit-status {}
+      - go mod verify
+    vars:
+      NUM_CPUS:
+        sh: command -v nproc >/dev/null && (nproc --all 2>/dev/null || nproc 2>/dev/null) || sysctl -n hw.ncpu
+      GOBIN:
+        sh: go env GOBIN
+    sources:
+      - .tool-versions
+      - .golangci.yml
+      - "**/*.go"
+
+  lint:staged:
+    desc: Lints staged Go files only
+    silent: true
+    deps:
+      - setup:tools
+    cmds:
+      - sh -c 'STAGED_FILES=$(git diff --name-only --cached | grep "\.go$" | grep -v "tools\.go" | grep -v "_mock\.go" || true); if [ -n "$STAGED_FILES" ]; then if [ "$SKIP_GOLANGCI_LINT" != "1" ]; then echo "$STAGED_FILES" | xargs -I {} golangci-lint run {}; fi; echo "$STAGED_FILES" | xargs -I {} {{.GOBIN}}/goimports-reviser -use-cache -rm-unused -format -list-diff -set-exit-status {}; fi'
+      - go mod verify
+    vars:
+      GOBIN:
+        sh: go env GOBIN
