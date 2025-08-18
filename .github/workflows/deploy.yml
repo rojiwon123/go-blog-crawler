@@ -31,12 +31,12 @@ jobs:
       - name: Setup ECR Repository
         uses: deploy-actions/setup-ecr@v1
         with:
-          RepositoryName: blog-crawler
+          RepositoryName: blog-scraper
           # ImageTagMutability: IMMUTABLE
 
       - name: Image Tag
         id: image
-        run: echo "tag=${{ steps.ecr.outputs.registry }}/blog-crawler:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=${{ steps.ecr.outputs.registry }}/blog-scraper:${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -67,7 +67,7 @@ jobs:
       - name: Deploy Lambda
         uses: deploy-actions/lambda-api@v1
         with:
-          Name: blog-aggregator
+          Name: blog-scraper
           ImageUri: ${{ steps.target.outputs.digest }}
           MemorySize: 1024
           Timeout: 300
@@ -84,4 +84,3 @@ jobs:
                     - s3:PutObject
                 Resource:
                     - "arn:aws:s3:::blog.tech/*"
-          
