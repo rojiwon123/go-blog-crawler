@@ -1,28 +1,27 @@
-package crawler
+package scraper
 
 import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"go-blog-crawler/internal/models"
+	"go-blog-scraper/internal/models"
 
 	"github.com/chromedp/chromedp"
 )
 
-// MediumCrawler는 Medium 블로그 크롤링을 위한 인터페이스입니다
-type MediumCrawler interface {
-	// Crawl은 지정된 날짜 이내의 포스트를 크롤링하고 메타 정보까지 추출합니다
-	Crawl(ctx context.Context, lastPublishedAt time.Time) ([]models.BlogPost, error)
+// MediumScraper는 Medium 블로그 스크래핑을 위한 인터페이스입니다
+type MediumScraper interface {
+	// Scrape는 지정된 날짜 이내의 포스트를 스크래핑하고 메타 정보까지 추출합니다
+	Scrape(ctx context.Context, lastPublishedAt time.Time) ([]models.BlogPost, error)
 	Close() error
 }
 
-// MediumCrawlerConfig는 Medium 크롤러 설정을 담습니다
-type MediumCrawlerConfig struct {
+// MediumScraperConfig는 Medium 스크래핑 설정을 담습니다
+type MediumScraperConfig struct {
 	Path          string        // /daangn/all 같은 경로
 	Source        string        // daangn 같은 소스명
 	Title         string        // "당근 기술 블로그" 같은 제목
@@ -31,12 +30,12 @@ type MediumCrawlerConfig struct {
 	InitialDelay  time.Duration // 초기 대기 시간 (Cloudflare 우회용)
 	Headless      bool          // 헤드리스 모드 여부
 	MaxConcurrent int           // 최대 동시 상세 페이지 접속 수
-	Timeout       time.Duration // 크롤링 타임아웃
+	Timeout       time.Duration // 스크래핑 타임아웃
 }
 
-// DefaultMediumConfig는 기본 Medium 크롤러 설정을 반환합니다
-func DefaultMediumConfig() MediumCrawlerConfig {
-	return MediumCrawlerConfig{
+// DefaultMediumConfig는 기본 Medium 스크래핑 설정을 반환합니다
+func DefaultMediumConfig() MediumScraperConfig {
+	return MediumScraperConfig{
 		MaxScrolls:    100,
 		ScrollDelay:   2 * time.Second,
 		InitialDelay:  45 * time.Second,
@@ -46,28 +45,28 @@ func DefaultMediumConfig() MediumCrawlerConfig {
 	}
 }
 
-// baseMediumCrawler는 Medium 크롤러의 기본 구현을 담습니다
-type baseMediumCrawler struct {
+// baseMediumScraper는 Medium 스크래핑의 기본 구현을 담습니다
+type baseMediumScraper struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	config MediumCrawlerConfig
+	config MediumScraperConfig
 }
 
-// NewMediumCrawler는 새로운 Medium 크롤러를 생성합니다
-func NewMediumCrawler(config MediumCrawlerConfig) (MediumCrawler, error) {
+// NewMediumScraper는 새로운 Medium 스크래핑을 생성합니다
+func NewMediumScraper(config MediumScraperConfig) (MediumScraper, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 
-	crawler := &baseMediumCrawler{
+	scraper := &baseMediumScraper{
 		ctx:    ctx,
 		cancel: cancel,
 		config: config,
 	}
 
-	return crawler, nil
+	return scraper, nil
 }
 
 // getFullURL은 전체 URL을 반환합니다
-func (c *baseMediumCrawler) getFullURL() string {
+func (c *baseMediumScraper) getFullURL() string {
 	baseURL := "https://medium.com"
 	if c.config.Path != "" {
 		return baseURL + c.config.Path
@@ -75,9 +74,9 @@ func (c *baseMediumCrawler) getFullURL() string {
 	return baseURL
 }
 
-// Crawl은 지정된 날짜까지 블로그 포스트를 크롤링합니다
-func (c *baseMediumCrawler) Crawl(ctx context.Context, lastPublishedAt time.Time) ([]models.BlogPost, error) {
-	log.Printf("🚀 %s 크롤링 시작", c.config.Title)
+// Scrape는 지정된 날짜까지 블로그 포스트를 스크래핑합니다
+func (c *baseMediumScraper) Scrape(ctx context.Context, lastPublishedAt time.Time) ([]models.BlogPost, error) {
+	log.Printf("🚀 %s 스크래핑 시작", c.config.Title)
 	log.Printf("📅 %s 이전 글까지 수집", lastPublishedAt.Format("2006-01-02"))
 
 	// Chrome 옵션 설정
@@ -87,7 +86,7 @@ func (c *baseMediumCrawler) Crawl(ctx context.Context, lastPublishedAt time.Time
 	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancel()
 
-	// 크롤링 컨텍스트 생성
+	// 스크래핑 컨텍스트 생성
 	taskCtx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
 	defer cancel()
 
@@ -135,8 +134,8 @@ func (c *baseMediumCrawler) Crawl(ctx context.Context, lastPublishedAt time.Time
 	return posts, nil
 }
 
-// Close는 크롤러를 종료합니다
-func (c *baseMediumCrawler) Close() error {
+// Close는 스크래핑을 종료합니다
+func (c *baseMediumScraper) Close() error {
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -144,7 +143,7 @@ func (c *baseMediumCrawler) Close() error {
 }
 
 // getChromeOptions는 Chrome 옵션을 반환합니다
-func (c *baseMediumCrawler) getChromeOptions() []chromedp.ExecAllocatorOption {
+func (c *baseMediumScraper) getChromeOptions() []chromedp.ExecAllocatorOption {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", c.config.Headless),
 		chromedp.Flag("disable-web-security", true),
@@ -172,7 +171,7 @@ func (c *baseMediumCrawler) getChromeOptions() []chromedp.ExecAllocatorOption {
 }
 
 // extractPosts는 페이지에서 포스트 정보를 추출합니다
-func (c *baseMediumCrawler) extractPosts(posts *[]models.BlogPost) chromedp.ActionFunc {
+func (c *baseMediumScraper) extractPosts(posts *[]models.BlogPost) chromedp.ActionFunc {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		// JavaScript로 포스트 정보 추출
 		var result interface{}
@@ -359,8 +358,8 @@ func (c *baseMediumCrawler) extractPosts(posts *[]models.BlogPost) chromedp.Acti
 	})
 }
 
-// shouldStop은 크롤링을 중단해야 하는지 확인합니다
-func (c *baseMediumCrawler) shouldStop(posts []models.BlogPost, lastPublishedAt time.Time) bool {
+// shouldStop은 스크래핑을 중단해야 하는지 확인합니다
+func (c *baseMediumScraper) shouldStop(posts []models.BlogPost, lastPublishedAt time.Time) bool {
 	if len(posts) == 0 {
 		return false
 	}
@@ -375,7 +374,7 @@ func (c *baseMediumCrawler) shouldStop(posts []models.BlogPost, lastPublishedAt 
 
 	// 지정된 날짜 이전 글이면 중단 (더 오래된 글을 찾을 필요 없음)
 	if oldestPost.PublishedAt.Before(lastPublishedAt) {
-		log.Printf("🛑 크롤링 중단 조건 충족: 가장 오래된 글 %s (%s 이전)",
+		log.Printf("🛑 스크래핑 중단 조건 충족: 가장 오래된 글 %s (%s 이전)",
 			oldestPost.PublishedAt.Format("2006-01-02"), lastPublishedAt.Format("2006-01-02"))
 		return true
 	}
@@ -383,36 +382,8 @@ func (c *baseMediumCrawler) shouldStop(posts []models.BlogPost, lastPublishedAt 
 	return false
 }
 
-// saveHTMLToFile은 HTML 내용을 파일로 저장합니다
-func (c *baseMediumCrawler) saveHTMLToFile(htmlContent, filename string) error {
-	fullHTML := `<!DOCTYPE html>
-<html lang="ko">
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Medium Page Snapshot</title>
-	<style>
-		body { font-family: Arial, sans-serif; margin: 20px; }
-		.info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-		.timestamp { color: #666; font-size: 12px; }
-	</style>
-</head>
-<body>
-	<div class="info">
-		<h1>Medium Page Snapshot</h1>
-		<p class="timestamp">저장 시간: ` + time.Now().Format("2006-01-02 15:04:05") + `</p>
-		<p>이 파일은 Medium 페이지의 동적 렌더링 결과를 캡처한 것입니다.</p>
-	</div>
-	<hr>
-	` + htmlContent + `
-</body>
-</html>`
-
-	return os.WriteFile(filename, []byte(fullHTML), 0644)
-}
-
 // parseDate는 다양한 날짜 형식을 파싱합니다
-func (c *baseMediumCrawler) parseDate(dateStr string) (time.Time, error) {
+func (c *baseMediumScraper) parseDate(dateStr string) (time.Time, error) {
 	if dateStr == "" {
 		return time.Now(), fmt.Errorf("빈 날짜 문자열")
 	}
@@ -478,18 +449,8 @@ func (c *baseMediumCrawler) parseDate(dateStr string) (time.Time, error) {
 	return time.Now(), fmt.Errorf("날짜 파싱 실패: %s", dateStr)
 }
 
-// containsPost는 포스트가 이미 존재하는지 확인합니다
-func containsPost(posts []models.BlogPost, post models.BlogPost) bool {
-	for _, existingPost := range posts {
-		if existingPost.URL == post.URL {
-			return true
-		}
-	}
-	return false
-}
-
 // removeAutomationDetection은 자동화 탐지를 제거합니다
-func (c *baseMediumCrawler) removeAutomationDetection(ctx context.Context) error {
+func (c *baseMediumScraper) removeAutomationDetection(ctx context.Context) error {
 	log.Printf("자동화 탐지 제거 중...")
 	stealthScript := `
 	() => {
@@ -527,7 +488,7 @@ func (c *baseMediumCrawler) removeAutomationDetection(ctx context.Context) error
 }
 
 // waitForCloudflareChallenge는 Cloudflare Challenge 완료를 기다립니다
-func (c *baseMediumCrawler) waitForCloudflareChallenge(ctx context.Context) error {
+func (c *baseMediumScraper) waitForCloudflareChallenge(ctx context.Context) error {
 	var challengeText string
 	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.body ? document.body.textContent : ''`, &challengeText)); err != nil {
 		return fmt.Errorf("Challenge 텍스트 확인 실패: %v", err)
@@ -543,7 +504,7 @@ func (c *baseMediumCrawler) waitForCloudflareChallenge(ctx context.Context) erro
 }
 
 // scrollAndCollectPosts는 스크롤하면서 포스트를 수집합니다
-func (c *baseMediumCrawler) scrollAndCollectPosts(ctx context.Context, lastPublishedAt time.Time) ([]models.BlogPost, error) {
+func (c *baseMediumScraper) scrollAndCollectPosts(ctx context.Context, lastPublishedAt time.Time) ([]models.BlogPost, error) {
 	var posts []models.BlogPost
 
 	scrollCount := 0
@@ -582,7 +543,7 @@ func (c *baseMediumCrawler) scrollAndCollectPosts(ctx context.Context, lastPubli
 
 			// 지정된 날짜 이후 글이면 중단
 			if c.shouldStop(posts, lastPublishedAt) {
-				log.Printf("🛑 크롤링 중단: %s 이후 글 발견", lastPublishedAt.Format("2006-01-02"))
+				log.Printf("🛑 스크래핑 중단: %s 이후 글 발견", lastPublishedAt.Format("2006-01-02"))
 				break
 			}
 
@@ -609,9 +570,9 @@ func (c *baseMediumCrawler) scrollAndCollectPosts(ctx context.Context, lastPubli
 		// 더 이상 스크롤할 수 없거나 지정된 날짜 이후 포스트가 나오면 중단
 		if (noChangeCount >= maxNoChangeCount && noNewPostCount >= maxNoNewPostCount) || c.shouldStop(posts, lastPublishedAt) {
 			if noChangeCount >= maxNoChangeCount && noNewPostCount >= maxNoNewPostCount {
-				log.Printf("페이지 높이 변화가 %d번 연속 없고, 새로운 포스트도 %d번 연속 없어서 크롤링 중단", maxNoChangeCount, maxNoNewPostCount)
+				log.Printf("페이지 높이 변화가 %d번 연속 없고, 새로운 포스트도 %d번 연속 없어서 스크래핑 중단", maxNoChangeCount, maxNoNewPostCount)
 			} else {
-				log.Printf("지정된 날짜 이후 포스트 발견으로 크롤링 중단")
+				log.Printf("지정된 날짜 이후 포스트 발견으로 스크래핑 중단")
 			}
 			break
 		}
@@ -641,7 +602,7 @@ func (c *baseMediumCrawler) scrollAndCollectPosts(ctx context.Context, lastPubli
 }
 
 // removeDuplicates는 중복된 포스트를 제거합니다
-func (c *baseMediumCrawler) removeDuplicates(posts []models.BlogPost) []models.BlogPost {
+func (c *baseMediumScraper) removeDuplicates(posts []models.BlogPost) []models.BlogPost {
 	seen := make(map[string]bool)
 	var result []models.BlogPost
 
@@ -656,7 +617,7 @@ func (c *baseMediumCrawler) removeDuplicates(posts []models.BlogPost) []models.B
 }
 
 // extractPostMetaInfo는 개별 포스트의 메타 정보를 추출합니다
-func (c *baseMediumCrawler) extractPostMetaInfo(ctx context.Context, postURL string) (*models.BlogPost, error) {
+func (c *baseMediumScraper) extractPostMetaInfo(ctx context.Context, postURL string) (*models.BlogPost, error) {
 	// 새로운 Chrome 컨텍스트 생성 (기존과 분리)
 	opts := c.getChromeOptions()
 	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
@@ -696,7 +657,7 @@ func (c *baseMediumCrawler) extractPostMetaInfo(ctx context.Context, postURL str
 }
 
 // extractMetaInfoParallel는 포스트들의 메타 정보를 병렬로 추출합니다
-func (c *baseMediumCrawler) extractMetaInfoParallel(ctx context.Context, posts []models.BlogPost) ([]models.BlogPost, error) {
+func (c *baseMediumScraper) extractMetaInfoParallel(ctx context.Context, posts []models.BlogPost) ([]models.BlogPost, error) {
 	log.Printf("🔍 메타 정보 추출 시작: %d개 포스트", len(posts))
 
 	// 세마포어를 사용하여 동시 접속 수 제한
@@ -751,7 +712,7 @@ func (c *baseMediumCrawler) extractMetaInfoParallel(ctx context.Context, posts [
 }
 
 // extractPostMetaInfoJS는 개별 포스트 페이지에서 메타 정보를 추출하는 JavaScript입니다
-func (c *baseMediumCrawler) extractPostMetaInfoJS(result *models.BlogPost) chromedp.ActionFunc {
+func (c *baseMediumScraper) extractPostMetaInfoJS(result *models.BlogPost) chromedp.ActionFunc {
 	return chromedp.ActionFunc(func(ctx context.Context) error {
 		script := `
 		(function() {

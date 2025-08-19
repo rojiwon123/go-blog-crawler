@@ -1,4 +1,4 @@
-module go-blog-crawler
+module go-blog-scraper
 
 go 1.24.5
 

@@ -2,7 +2,7 @@ package models
 
 import "time"
 
-// BlogPost는 크롤링된 블로그 포스트 정보를 담습니다
+// BlogPost는 스크래핑된 블로그 포스트 정보를 담습니다
 type BlogPost struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`

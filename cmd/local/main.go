@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"go-blog-crawler/internal/crawler"
-	"go-blog-crawler/internal/models"
+	"go-blog-scraper/internal/models"
+	"go-blog-scraper/internal/scraper"
 )
 
 func main() {
 	// 기본 설정
-	config := crawler.DefaultMediumConfig()
+	config := scraper.DefaultMediumConfig()
 
-	// 당근 크롤러 설정
+	// 당근 스크래핑 설정
 	path := "/daangn/all"
 	source := "daangn"
 	title := "당근 기술 블로그"
@@ -38,7 +38,7 @@ func main() {
 		}
 	}
 
-	log.Printf("🚀 크롤러 시작")
+	log.Printf("🚀 스크래핑 시작")
 	log.Printf("📝 Path: %s", path)
 	log.Printf("🏷️  소스: %s", title)
 
@@ -47,25 +47,25 @@ func main() {
 		log.Fatalf("❌ Path는 /로 시작해야 합니다: %s", path)
 	}
 
-	// 크롤러 생성
+	// 스크래핑 생성
 	config.Path = path
 	config.Source = source
 	config.Title = title
 
-	crawlerInstance, err := crawler.NewMediumCrawler(config)
+	scraperInstance, err := scraper.NewMediumScraper(config)
 	if err != nil {
-		log.Fatalf("❌ 크롤러 생성 실패: %v", err)
+		log.Fatalf("❌ 스크래핑 생성 실패: %v", err)
 	}
-	defer crawlerInstance.Close()
+	defer scraperInstance.Close()
 
-	// 크롤링할 마지막 날짜 설정 (2025년 7월 1일 이후)
+	// 스크래핑할 마지막 날짜 설정 (2025년 7월 1일 이후)
 	lastPublishedAt := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	log.Printf("📅 %s 이후 글까지 수집 예정", lastPublishedAt.Format("2006-01-02"))
 
-	// 크롤링 실행
-	posts, err := crawlerInstance.Crawl(context.Background(), lastPublishedAt)
+	// 스크래핑 실행
+	posts, err := scraperInstance.Scrape(context.Background(), lastPublishedAt)
 	if err != nil {
-		log.Fatalf("❌ 크롤링 실패: %v", err)
+		log.Fatalf("❌ 스크래핑 실패: %v", err)
 	}
 
 	// 결과 출력
@@ -76,12 +76,12 @@ func main() {
 	log.Printf("🎯 전체 작업 완료: 총 %d개 포스트 수집 및 메타 정보 추출", len(posts))
 }
 
-// printResults는 크롤링 결과를 출력합니다
+// printResults는 스크래핑 결과를 출력합니다
 func printResults(posts []models.BlogPost) {
-	fmt.Printf("\n📊 크롤링 결과 요약\n")
+	fmt.Printf("\n📊 스크래핑 결과 요약\n")
 	fmt.Printf("총 포스트 수: %d개\n", len(posts))
 	if len(posts) > 0 {
-		fmt.Printf("크롤링 완료 시간: %s\n\n", posts[0].PublishedAt.Format("2006-01-02 15:04:05"))
+		fmt.Printf("스크래핑 완료 시간: %s\n\n", posts[0].PublishedAt.Format("2006-01-02 15:04:05"))
 	}
 
 	// 각 포스트 정보 출력
