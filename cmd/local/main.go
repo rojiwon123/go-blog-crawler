@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,52 +14,96 @@ import (
 )
 
 func main() {
-	// 기본 설정
-	config := scraper.DefaultMediumConfig()
-
-	// 당근 스크래핑 설정
-	path := "/daangn/all"
-	source := "daangn"
-	title := "당근 기술 블로그"
-	maxPosts := 5 // 테스트용으로 포스트 수 제한
-
-	// 명령행 인자가 있으면 사용
-	if len(os.Args) > 1 {
-		path = os.Args[1]
-	}
-	if len(os.Args) > 2 {
-		source = os.Args[2]
-	}
-	if len(os.Args) > 3 {
-		title = os.Args[3]
-	}
-	if len(os.Args) > 4 {
-		if max, err := fmt.Sscanf(os.Args[4], "%d", &maxPosts); err != nil || max != 1 {
-			log.Printf("⚠️  포스트 수 제한 파싱 실패, 기본값 %d 사용", maxPosts)
+	// 토스 스크래퍼 설정 (Medium 비활성화)
+	tossCfg := scraper.DefaultTossConfig()
+	// 기본: 개발 카테고리만 테스트. 필요 시 첫 번째 인자를 CSV로 받아 덮어씀 (예: "tech,data-ml")
+	tossCfg.CategoryPaths = []string{"tech"}
+	tossCfg.MaxPages = 3
+	tossCfg.Headless = true
+	tossCfg.Timeout = 2 * time.Minute
+	tossCfg.InitialDelay = 0
+	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
+		cats := strings.Split(os.Args[1], ",")
+		var trimmed []string
+		for _, c := range cats {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				trimmed = append(trimmed, c)
+			}
+		}
+		if len(trimmed) > 0 {
+			tossCfg.CategoryPaths = trimmed
 		}
 	}
 
-	log.Printf("🚀 스크래핑 시작")
-	log.Printf("📝 Path: %s", path)
-	log.Printf("🏷️  소스: %s", title)
+	log.Printf("🚀 토스 스크래핑 시작")
+	log.Printf("🗂️  카테고리: %s", strings.Join(tossCfg.CategoryPaths, ", "))
+	log.Printf("🏷️  소스: %s", tossCfg.Title)
 
-	// Path 유효성 검사
-	if !strings.HasPrefix(path, "/") {
-		log.Fatalf("❌ Path는 /로 시작해야 합니다: %s", path)
-	}
-
-	// 스크래핑 생성
-	config.Path = path
-	config.Source = source
-	config.Title = title
-
-	scraperInstance, err := scraper.NewMediumScraper(config)
+	scraperInstance, err := scraper.NewTossScraper(tossCfg)
 	if err != nil {
 		log.Fatalf("❌ 스크래핑 생성 실패: %v", err)
 	}
 	defer scraperInstance.Close()
 
-	// 스크래핑할 마지막 날짜 설정 (2025년 7월 1일 이후)
+	// 검증 모드: 테스트 JSON과 라이브 스크랩 결과를 비교
+	if os.Getenv("TOSS_VALIDATE") == "1" {
+		testPath := strings.TrimSpace(os.Getenv("TOSS_TEST_JSON"))
+		if testPath == "" {
+			log.Fatalf("❌ 검증 모드: TOSS_TEST_JSON이 필요합니다")
+		}
+		expected, err := loadTossTestPosts(testPath, tossCfg.Source)
+		if err != nil {
+			log.Fatalf("❌ 테스트 데이터 로드 실패: %v", err)
+		}
+		// 검증은 tech 1페이지만 대상으로 수행
+		tossCfg.CategoryPaths = []string{"tech"}
+		tossCfg.MaxPages = 1
+		// 재생성
+		scraperInstance, err = scraper.NewTossScraper(tossCfg)
+		if err != nil {
+			log.Fatalf("❌ 스크래퍼 재생성 실패: %v", err)
+		}
+		defer scraperInstance.Close()
+
+		lastPublishedAt := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		actual, err := scraperInstance.Scrape(context.Background(), lastPublishedAt)
+		if err != nil {
+			log.Fatalf("❌ 라이브 스크래핑 실패: %v", err)
+		}
+		// 상위 N 비교 (N = expected 길이)
+		n := len(expected)
+		if len(actual) < n {
+			log.Fatalf("❌ 라이브 결과 부족: 기대 %d개, 실제 %d개", n, len(actual))
+		}
+		mismatches := compareTopN(expected, actual[:n])
+		if len(mismatches) > 0 {
+			for _, msg := range mismatches {
+				log.Printf("❌ 불일치: %s", msg)
+			}
+			log.Fatalf("❌ 검증 실패: %d개 항목 불일치", len(mismatches))
+		}
+		log.Printf("✅ 검증 성공: 상위 %d개가 테스트 케이스와 일치", n)
+		printResults(actual[:n])
+		printYearlyStats(actual[:n])
+		printMetaInfoSummary(actual[:n])
+		return
+	}
+
+	// 테스트 JSON이 지정된 경우, 파일에서 로드하여 출력 후 종료
+	if testPath := os.Getenv("TOSS_TEST_JSON"); strings.TrimSpace(testPath) != "" {
+		posts, err := loadTossTestPosts(testPath, tossCfg.Source)
+		if err != nil {
+			log.Fatalf("❌ 테스트 데이터 로드 실패: %v", err)
+		}
+		printResults(posts)
+		printYearlyStats(posts)
+		printMetaInfoSummary(posts)
+		log.Printf("🎯 테스트 데이터 출력 완료: 총 %d개", len(posts))
+		return
+	}
+
+	// 스크래핑할 마지막 날짜 설정 (2025년 1월 1일 이후)
 	lastPublishedAt := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	log.Printf("📅 %s 이후 글까지 수집 예정", lastPublishedAt.Format("2006-01-02"))
 
@@ -74,6 +119,82 @@ func main() {
 	printMetaInfoSummary(posts)
 
 	log.Printf("🎯 전체 작업 완료: 총 %d개 포스트 수집 및 메타 정보 추출", len(posts))
+}
+
+// loadTossTestPosts는 toss_test.json 형태의 데이터를 로드합니다
+func loadTossTestPosts(path string, source string) ([]models.BlogPost, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	type testPost struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		PublishedAt string   `json:"publishedAt"`
+		Author      string   `json:"author"`
+		Thumbnail   string   `json:"thumbnail"`
+		ToURL       string   `json:"toUrl"`
+		Comments    int      `json:"comments"`
+		Keywords    []string `json:"keywords"`
+	}
+	var arr []testPost
+	if err := json.Unmarshal(data, &arr); err != nil {
+		return nil, err
+	}
+	var out []models.BlogPost
+	for _, it := range arr {
+		var published time.Time
+		if t, err := time.Parse("2006-01-02", strings.TrimSpace(it.PublishedAt)); err == nil {
+			published = t
+		}
+		out = append(out, models.BlogPost{
+			Title:       it.Title,
+			Description: it.Description,
+			Author:      it.Author,
+			PublishedAt: published,
+			Thumbnail:   it.Thumbnail,
+			URL:         it.ToURL,
+			Source:      source,
+			Comments:    it.Comments,
+			Keywords:    it.Keywords,
+		})
+	}
+	return out, nil
+}
+
+// compareTopN은 기대/실제 상위 N 항목을 필드별로 비교합니다
+func compareTopN(expected []models.BlogPost, actual []models.BlogPost) []string {
+	var diffs []string
+	minLen := len(expected)
+	if len(actual) < minLen {
+		minLen = len(actual)
+	}
+	for i := 0; i < minLen; i++ {
+		e := expected[i]
+		a := actual[i]
+		if strings.TrimSpace(e.Title) != strings.TrimSpace(a.Title) {
+			diffs = append(diffs, fmt.Sprintf("[%d] title: exp=%q act=%q", i+1, e.Title, a.Title))
+		}
+		if strings.TrimSpace(e.Description) != strings.TrimSpace(a.Description) {
+			diffs = append(diffs, fmt.Sprintf("[%d] description: exp=%q act=%q", i+1, e.Description, a.Description))
+		}
+		if strings.TrimSpace(e.Author) != strings.TrimSpace(a.Author) {
+			diffs = append(diffs, fmt.Sprintf("[%d] author: exp=%q act=%q", i+1, e.Author, a.Author))
+		}
+		if e.PublishedAt.Format("2006-01-02") != a.PublishedAt.Format("2006-01-02") {
+			diffs = append(diffs, fmt.Sprintf("[%d] publishedAt: exp=%s act=%s", i+1, e.PublishedAt.Format("2006-01-02"), a.PublishedAt.Format("2006-01-02")))
+		}
+		if strings.TrimSpace(e.Thumbnail) != strings.TrimSpace(a.Thumbnail) {
+			diffs = append(diffs, fmt.Sprintf("[%d] thumbnail: exp=%q act=%q", i+1, e.Thumbnail, a.Thumbnail))
+		}
+		if strings.TrimSpace(e.URL) != strings.TrimSpace(a.URL) {
+			diffs = append(diffs, fmt.Sprintf("[%d] url: exp=%q act=%q", i+1, e.URL, a.URL))
+		}
+		if e.Comments != a.Comments {
+			diffs = append(diffs, fmt.Sprintf("[%d] comments: exp=%d act=%d", i+1, e.Comments, a.Comments))
+		}
+	}
+	return diffs
 }
 
 // printResults는 스크래핑 결과를 출력합니다
